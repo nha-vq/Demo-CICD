@@ -108,9 +108,13 @@ jobs:
           echo "- Coverage: ${COVERAGE_PERCENT}%" >> $GITHUB_STEP_SUMMARY
           echo "- Threshold: ${THRESHOLD}%" >> $GITHUB_STEP_SUMMARY
 
-          python3 -c "import sys; sys.exit(0 if float('$COVERAGE_PERCENT') >= float('$THRESHOLD') else 1)"
-
-          echo "- Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
+          if python3 -c "import sys; sys.exit(0 if float('$COVERAGE_PERCENT') >= float('$THRESHOLD') else 1)"; then
+            echo "- Result: ✅ PASS (coverage meets threshold)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Result: ❌ FAIL (coverage is below threshold)" >> $GITHUB_STEP_SUMMARY
+            echo "- Reason: ${COVERAGE_PERCENT}% < ${THRESHOLD}%" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
 
       # Add a summary section to the workflow run for demo readability
       - name: Add summary
