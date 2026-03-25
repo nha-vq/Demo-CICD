@@ -108,13 +108,7 @@ jobs:
           echo "- Coverage: ${COVERAGE_PERCENT}%" >> $GITHUB_STEP_SUMMARY
           echo "- Threshold: ${THRESHOLD}%" >> $GITHUB_STEP_SUMMARY
 
-          python3 - <<PY
-            coverage = float("$COVERAGE_PERCENT")
-            threshold = float("$THRESHOLD")
-            if coverage < threshold:
-                print("Coverage below threshold")
-                raise SystemExit(1)
-            PY
+          python3 -c "import sys; sys.exit(0 if float('$COVERAGE_PERCENT') >= float('$THRESHOLD') else 1)"
 
           echo "- Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
 
