@@ -53,15 +53,22 @@ jobs:
       - name: Build test project
         run: dotnet build ./DemoSonarApp.Tests/DemoSonarApp.Tests.csproj --configuration Release --no-restore
 
-      # Run unit tests and generate test result file (.trx)
-      - name: Run unit tests
+      # Run unit tests, generate test result (.trx) and collect code coverage
+      - name: Run unit tests with coverage
         run: >
           dotnet test ./DemoSonarApp.Tests/DemoSonarApp.Tests.csproj
           --configuration Release
           --no-build
           --logger "trx;LogFileName=test-results.trx"
           --results-directory ./test-results
-
+          --collect:"XPlat Code Coverage"
+          
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: '**/coverage.cobertura.xml'
+            
       # Publish test results to GitHub UI (visible in Checks tab)
       - name: Publish test results
         uses: dorny/test-reporter@v1
