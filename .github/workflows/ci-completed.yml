@@ -1,0 +1,89 @@
+name: CI Completed
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test-main:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the latest code from main branch
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # Install the required .NET SDK
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Cache NuGet dependencies to optimize build time
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Restore dependencies for the application
+      - name: Restore app project
+        run: dotnet restore ./DemoSonarApp/DemoSonarApp.csproj
+
+      # Restore dependencies for the test project
+      - name: Restore test project
+        run: dotnet restore ./DemoSonarApp.Tests/DemoSonarApp.Tests.csproj
+
+      # Build the application project
+      - name: Build app project
+        run: dotnet build ./DemoSonarApp/DemoSonarApp.csproj --configuration Release --no-restore
+
+      # Build the test project
+      - name: Build test project
+        run: dotnet build ./DemoSonarApp.Tests/DemoSonarApp.Tests.csproj --configuration Release --no-restore
+
+      # Execute unit tests and output results in TRX format
+      - name: Run unit tests
+        run: >
+          dotnet test ./DemoSonarApp.Tests/DemoSonarApp.Tests.csproj
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory ./test-results
+
+      # Publish test results so they appear in GitHub UI
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Unit Tests (Main)
+          path: ./test-results/*.trx
+          reporter: dotnet-trx
+
+      # Publish compiled application output (ready for deployment)
+      - name: Publish app
+        run: >
+          dotnet publish ./DemoSonarApp/DemoSonarApp.csproj
+          --configuration Release
+          --no-build
+          --output ./publish
+
+      # Upload build artifact for later use (e.g., deployment)
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-build-package
+          path: ./publish
+          retention-days: 7
+
+      # Add human-readable summary for demo purposes
+      - name: Add summary
+        if: always()
+        run: |
+          echo "## CI Completed Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Unit tests: see report in Checks tab" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifact: main-build-package" >> $GITHUB_STEP_SUMMARY
