@@ -84,31 +84,36 @@ jobs:
         run: |
           COVERAGE_FILE=$(find . -name 'coverage.cobertura.xml' | head -n 1)
 
+          echo "=== Coverage Quality Gate ==="
           echo "## Coverage Quality Gate" >> $GITHUB_STEP_SUMMARY
 
           if [ -z "$COVERAGE_FILE" ]; then
+            echo "Coverage file not found!"
             echo "- Coverage file not found!" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
           LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COVERAGE_FILE" | head -n 1 | sed 's/line-rate="//;s/"//')
 
-          if [ -z "$LINE_RATE" ]; then
-            echo "- Unable to read line-rate from coverage file!" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-
           COVERAGE_PERCENT=$(python3 -c "print(round(float('$LINE_RATE') * 100, 2))")
           THRESHOLD=70
+
+          echo "Coverage: ${COVERAGE_PERCENT}%"
+          echo "Threshold: ${THRESHOLD}%"
 
           echo "- Coverage: ${COVERAGE_PERCENT}%" >> $GITHUB_STEP_SUMMARY
           echo "- Threshold: ${THRESHOLD}%" >> $GITHUB_STEP_SUMMARY
 
           if python3 -c "import sys; sys.exit(0 if float('$COVERAGE_PERCENT') >= float('$THRESHOLD') else 1)"; then
-            echo "- Result: ✅ PASS (coverage meets threshold)" >> $GITHUB_STEP_SUMMARY
+            echo "PASS: Coverage meets threshold"
+            echo "- Result: PASS" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Result: ❌ FAIL (coverage is below threshold)" >> $GITHUB_STEP_SUMMARY
+            echo "FAIL: Coverage is below threshold"
+            echo "Reason: ${COVERAGE_PERCENT}% < ${THRESHOLD}%"
+
+            echo "- Result: FAIL" >> $GITHUB_STEP_SUMMARY
             echo "- Reason: ${COVERAGE_PERCENT}% < ${THRESHOLD}%" >> $GITHUB_STEP_SUMMARY
+
             exit 1
           fi
 
