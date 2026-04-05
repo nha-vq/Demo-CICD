@@ -107,18 +107,13 @@ jobs:
           if (Test-Path $stdoutFile) { Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue }
           if (Test-Path $stderrFile) { Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue }
 
-          Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
-          $process = Start-Process `
-            -FilePath "dotnet" `
-            -ArgumentList @($dllPath, "--urls", "http://localhost:5050") `
-            -WorkingDirectory $appPath `
-            -RedirectStandardOutput $stdoutFile `
-            -RedirectStandardError $stderrFile `
-            -WindowStyle Hidden `
-            -PassThru
+          # Launch via cmd/start with RUNNER_TRACKING_ID cleared to avoid runner cleanup.
+          $startCmd = "set RUNNER_TRACKING_ID= && cd /d `"$appPath`" && start `"`" /b dotnet `"$dllPath`" --urls http://localhost:5050 1>>`"$stdoutFile`" 2>>`"$stderrFile`""
+          Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $startCmd) -WindowStyle Hidden
 
           Start-Sleep -Seconds 5
-          $listener = Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+          $listener = Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
           if (-not $listener) {
             Write-Error "Application did not open TCP port 5050."
             if (Test-Path $stderrFile) {
@@ -126,11 +121,17 @@ jobs:
             }
             exit 1
           }
-          $process.Id | Out-File $pidFile -Encoding ascii
+          $listener.OwningProcess | Out-File $pidFile -Encoding ascii
 
       - name: Debug running process
         shell: powershell
         run: |
+          $listener = Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($listener) {
+            Write-Host "Port 5050 is listening with PID: $($listener.OwningProcess)"
+          } else {
+            Write-Host "Port 5050 is NOT listening"
+          }
           Get-Process dotnet -ErrorAction SilentlyContinue
 
       # Wait and verify the application is running
@@ -138,7 +139,7 @@ jobs:
         shell: powershell
         run: |
           $url = "http://localhost:5050/weatherforecast"
-          $maxAttempts = 12
+          $maxAttempts = 6
 
           for ($i = 1; $i -le $maxAttempts; $i++) {
             try {
