@@ -71,42 +71,24 @@ jobs:
           Copy-Item "$artifactPath\*" $appPath -Recurse -Force
 
       # Start the application from the published artifact
-      - name: Start application detached
+      - name: Start application via Scheduled Task
         shell: powershell
         run: |
           $appPath = "C:\deploy\app"
           $dllPath = Join-Path $appPath "DemoSonarApp.dll"
-          $pidFile = Join-Path $appPath "app.pid"
-          $stdoutFile = Join-Path $appPath "app.log"
-          $stderrFile = Join-Path $appPath "app-error.log"
+          $taskName = "DemoSonarApp-Run"
       
           if (!(Test-Path $dllPath)) {
             Write-Error "Application DLL not found: $dllPath"
             exit 1
           }
       
-          if (Test-Path $stdoutFile) { Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue }
-          if (Test-Path $stderrFile) { Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue }
+          schtasks /Delete /TN $taskName /F 2>$null | Out-Null
       
-          $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = "dotnet"
-          $psi.WorkingDirectory = $appPath
-          $psi.Arguments = "`"$dllPath`" --urls http://localhost:5050"
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardOutput = $true
-          $psi.RedirectStandardError = $true
+          $taskCommand = "cmd /c cd /d `"$appPath`" && dotnet `"$dllPath`" --urls http://localhost:5050 > app.log 2> app-error.log"
       
-          # Critical: prevent GitHub runner from tracking and killing this process
-          $psi.EnvironmentVariables.Remove("RUNNER_TRACKING_ID")
-      
-          $process = New-Object System.Diagnostics.Process
-          $process.StartInfo = $psi
-          $process.Start() | Out-Null
-      
-          $process.Id | Out-File $pidFile -Encoding ascii
-      
-          $process.StandardOutput.ReadToEndAsync() | Out-Null
-          $process.StandardError.ReadToEndAsync() | Out-Null
+          schtasks /Create /TN $taskName /SC ONCE /ST 23:59 /TR $taskCommand /RU $env:USERNAME /F | Out-Null
+          schtasks /Run /TN $taskName | Out-Null
       
           Start-Sleep -Seconds 8
 
@@ -122,10 +104,11 @@ jobs:
         run: |
           $url = "http://localhost:5050/weatherforecast"
           $maxAttempts = 12
-
+      
           for ($i = 1; $i -le $maxAttempts; $i++) {
             try {
               $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+              Write-Host "Status code: $($response.StatusCode)"
               if ($response.StatusCode -eq 200) {
                 Write-Host "Application is reachable."
                 exit 0
@@ -133,14 +116,25 @@ jobs:
             }
             catch {
               Write-Host "Attempt $i failed. Retrying in 5 seconds..."
+              Write-Host $_.Exception.Message
             }
-
+      
             Start-Sleep -Seconds 5
           }
-
+      
           Write-Error "Application is not reachable after deployment."
           exit 1
 
+      - name: Show app logs
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "=== APP LOG ==="
+          Get-Content C:\deploy\app\app.log -ErrorAction SilentlyContinue
+      
+          Write-Host "=== APP ERROR LOG ==="
+          Get-Content C:\deploy\app\app-error.log -ErrorAction SilentlyContinue
+          
       # Add deployment summary
       - name: Add summary
         if: always()
