@@ -83,12 +83,24 @@ jobs:
             exit 1
           }
       
-          schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+          cmd /c "schtasks /Delete /TN $taskName /F" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Task did not exist yet. Continuing..."
+          }
       
           $taskCommand = "cmd /c cd /d `"$appPath`" && dotnet `"$dllPath`" --urls http://localhost:5050 > app.log 2> app-error.log"
       
-          schtasks /Create /TN $taskName /SC ONCE /ST 23:59 /TR $taskCommand /RU $env:USERNAME /F | Out-Null
-          schtasks /Run /TN $taskName | Out-Null
+          cmd /c "schtasks /Create /TN $taskName /SC ONCE /ST 23:59 /TR `"$taskCommand`" /RU $env:USERNAME /F"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to create scheduled task."
+            exit 1
+          }
+      
+          cmd /c "schtasks /Run /TN $taskName"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to run scheduled task."
+            exit 1
+          }
       
           Start-Sleep -Seconds 8
 
