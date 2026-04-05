@@ -41,7 +41,6 @@ jobs:
         run: |
           $pidFile = "C:\deploy\app\app.pid"
           $port = 5050
-          $taskName = "DemoSonarApp-Run"
 
           if (Test-Path $pidFile) {
             $appPid = Get-Content $pidFile
@@ -49,18 +48,6 @@ jobs:
               Stop-Process -Id $appPid -Force -ErrorAction SilentlyContinue
             }
             Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-          }
-
-          cmd /c "schtasks /End /TN $taskName" | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Task $taskName was not running or did not exist. Continuing..."
-            $global:LASTEXITCODE = 0
-          }
-
-          cmd /c "schtasks /Delete /TN $taskName /F" | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Task $taskName did not exist. Continuing..."
-            $global:LASTEXITCODE = 0
           }
 
           # Extra cleanup: kill any process still listening on deploy port.
@@ -111,7 +98,6 @@ jobs:
           $pidFile = Join-Path $appPath "app.pid"
           $stdoutFile = Join-Path $appPath "app.log"
           $stderrFile = Join-Path $appPath "app-error.log"
-          $taskName = "DemoSonarApp-Run"
 
           if (!(Test-Path $dllPath)) {
             Write-Error "Application DLL not found: $dllPath"
@@ -121,18 +107,15 @@ jobs:
           if (Test-Path $stdoutFile) { Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue }
           if (Test-Path $stderrFile) { Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue }
 
-          $taskCommand = "cmd /c cd /d `"$appPath`" && dotnet `"$dllPath`" --urls http://localhost:5050 > app.log 2> app-error.log"
-          cmd /c "schtasks /Create /TN $taskName /SC ONCE /ST 23:59 /TR `"$taskCommand`" /RU SYSTEM /F"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to create scheduled task."
-            exit 1
-          }
-
-          cmd /c "schtasks /Run /TN $taskName"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to run scheduled task."
-            exit 1
-          }
+          Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
+          $process = Start-Process `
+            -FilePath "dotnet" `
+            -ArgumentList @($dllPath, "--urls", "http://localhost:5050") `
+            -WorkingDirectory $appPath `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile `
+            -WindowStyle Hidden `
+            -PassThru
 
           Start-Sleep -Seconds 5
           $listener = Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -143,7 +126,7 @@ jobs:
             }
             exit 1
           }
-          $listener.OwningProcess | Out-File $pidFile -Encoding ascii
+          $process.Id | Out-File $pidFile -Encoding ascii
 
       - name: Debug running process
         shell: powershell
