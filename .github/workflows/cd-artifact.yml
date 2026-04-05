@@ -131,6 +131,6 @@ jobs:
           "- Source workflow: CI Completed" >> $env:GITHUB_STEP_SUMMARY
           "- Artifact: main-build-package" >> $env:GITHUB_STEP_SUMMARY
           "- Deployment target: self-hosted runner" >> $env:GITHUB_STEP_SUMMARY
-          "- URL: http://localhost:5050/swagger" >> $env:GITHUB_STEP_SUMMARY
+          "- URL: http://localhost:5050/weatherforecast" >> $env:GITHUB_STEP_SUMMARY
           "- Verification: post-deployment endpoint check" >> $env:GITHUB_STEP_SUMMARY
           "- Status: deployment finished" >> $env:GITHUB_STEP_SUMMARY
