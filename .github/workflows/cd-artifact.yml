@@ -5,6 +5,7 @@ on:
     workflows: ["CI Completed"]
     types:
       - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,12 +13,13 @@ permissions:
 
 jobs:
   deploy-artifact:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: [self-hosted, Windows, X64]
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
 
     steps:
-      # Download the artifact produced by the completed CI workflow run
+      # Download artifact from the triggering CI Completed run
       - name: Download build artifact from CI Completed
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v4
         with:
           name: main-build-package
@@ -25,15 +27,24 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
+      # Fallback note for manual runs
+      - name: Manual run note
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: powershell
+        run: |
+          Write-Host "Manual trigger detected."
+          Write-Host "Please make sure artifact files already exist in C:\deploy\artifact before running this workflow manually."
+
       # Stop the currently running application if it exists
       - name: Stop current app
         shell: powershell
         run: |
           $pidFile = "C:\deploy\app\app.pid"
+
           if (Test-Path $pidFile) {
-            $pid = Get-Content $pidFile
-            if ($pid) {
-              Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            $appPid = Get-Content $pidFile
+            if ($appPid) {
+              Stop-Process -Id $appPid -Force -ErrorAction SilentlyContinue
             }
             Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
           }
@@ -45,9 +56,15 @@ jobs:
           $artifactPath = "C:\deploy\artifact"
           $appPath = "C:\deploy\app"
 
+          if (!(Test-Path $artifactPath)) {
+            Write-Error "Artifact path does not exist: $artifactPath"
+            exit 1
+          }
+
           if (Test-Path $appPath) {
             Remove-Item "$appPath\*" -Recurse -Force -ErrorAction SilentlyContinue
-          } else {
+          }
+          else {
             New-Item -ItemType Directory -Path $appPath | Out-Null
           }
 
@@ -59,15 +76,27 @@ jobs:
         run: |
           $appPath = "C:\deploy\app"
           $dllPath = Join-Path $appPath "DemoSonarApp.dll"
+          $pidFile = Join-Path $appPath "app.pid"
+
+          if (!(Test-Path $dllPath)) {
+            Write-Error "Application DLL not found: $dllPath"
+            exit 1
+          }
 
           $process = Start-Process "dotnet" `
             -ArgumentList "$dllPath --urls http://localhost:5050" `
             -WorkingDirectory $appPath `
             -PassThru
 
-          $process.Id | Out-File "C:\deploy\app\app.pid" -Encoding ascii
+          $process.Id | Out-File $pidFile -Encoding ascii
 
-      # Wait and verify the application is running
+      # Optional debug step to confirm dotnet process is running
+      - name: Debug running process
+        shell: powershell
+        run: |
+          Get-Process dotnet -ErrorAction SilentlyContinue
+
+      # Verify application after deployment
       - name: Verify deployed app
         shell: powershell
         run: |
@@ -94,12 +123,14 @@ jobs:
 
       # Add deployment summary
       - name: Add summary
+        if: always()
         shell: powershell
         run: |
           "## CD Deploy Artifact" >> $env:GITHUB_STEP_SUMMARY
+          "- Trigger: ${{ github.event_name }}" >> $env:GITHUB_STEP_SUMMARY
           "- Source workflow: CI Completed" >> $env:GITHUB_STEP_SUMMARY
           "- Artifact: main-build-package" >> $env:GITHUB_STEP_SUMMARY
-          "- Deployment target: self-hosted Windows runner" >> $env:GITHUB_STEP_SUMMARY
+          "- Deployment target: self-hosted runner" >> $env:GITHUB_STEP_SUMMARY
           "- URL: http://localhost:5050/swagger" >> $env:GITHUB_STEP_SUMMARY
-          "- Verification: application endpoint checked after deployment" >> $env:GITHUB_STEP_SUMMARY
-          "- Status: deployment completed" >> $env:GITHUB_STEP_SUMMARY
+          "- Verification: post-deployment endpoint check" >> $env:GITHUB_STEP_SUMMARY
+          "- Status: deployment finished" >> $env:GITHUB_STEP_SUMMARY
