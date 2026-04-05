@@ -41,6 +41,7 @@ jobs:
         run: |
           $pidFile = "C:\deploy\app\app.pid"
           $port = 5050
+          $taskName = "DemoSonarApp-Run"
 
           if (Test-Path $pidFile) {
             $appPid = Get-Content $pidFile
@@ -49,6 +50,9 @@ jobs:
             }
             Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
           }
+
+          cmd /c "schtasks /End /TN $taskName" | Out-Null
+          cmd /c "schtasks /Delete /TN $taskName /F" | Out-Null
 
           # Extra cleanup: kill any process still listening on deploy port.
           $listeningPids = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
@@ -97,6 +101,7 @@ jobs:
           $pidFile = Join-Path $appPath "app.pid"
           $stdoutFile = Join-Path $appPath "app.log"
           $stderrFile = Join-Path $appPath "app-error.log"
+          $taskName = "DemoSonarApp-Run"
 
           if (!(Test-Path $dllPath)) {
             Write-Error "Application DLL not found: $dllPath"
@@ -106,29 +111,29 @@ jobs:
           if (Test-Path $stdoutFile) { Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue }
           if (Test-Path $stderrFile) { Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue }
 
-          # Prevent GitHub runner from tracking and killing the detached process
-          Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
+          $taskCommand = "cmd /c cd /d `"$appPath`" && dotnet `"$dllPath`" --urls http://localhost:5050 > app.log 2> app-error.log"
+          cmd /c "schtasks /Create /TN $taskName /SC ONCE /ST 23:59 /TR `"$taskCommand`" /RU SYSTEM /F"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to create scheduled task."
+            exit 1
+          }
 
-          $process = Start-Process `
-            -FilePath "dotnet" `
-            -ArgumentList @("`"$dllPath`"", "--urls", "http://localhost:5050") `
-            -WorkingDirectory $appPath `
-            -RedirectStandardOutput $stdoutFile `
-            -RedirectStandardError $stderrFile `
-            -WindowStyle Hidden `
-            -PassThru
+          cmd /c "schtasks /Run /TN $taskName"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to run scheduled task."
+            exit 1
+          }
 
-          $process.Id | Out-File $pidFile -Encoding ascii
-
-          Start-Sleep -Seconds 8
-
-          if ($process.HasExited) {
-            Write-Error "Application exited right after start. Check logs."
+          Start-Sleep -Seconds 5
+          $listener = Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $listener) {
+            Write-Error "Application did not open TCP port 5050."
             if (Test-Path $stderrFile) {
               Get-Content $stderrFile -Tail 100
             }
             exit 1
           }
+          $listener.OwningProcess | Out-File $pidFile -Encoding ascii
 
       - name: Debug running process
         shell: powershell
@@ -144,7 +149,7 @@ jobs:
 
           for ($i = 1; $i -le $maxAttempts; $i++) {
             try {
-              $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+              $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 -Proxy $null
               if ($response.StatusCode -eq 200) {
                 Write-Host "Application is reachable."
                 exit 0
